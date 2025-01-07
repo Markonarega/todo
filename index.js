@@ -1,10 +1,18 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
-const app = express();
 const _ = require("lodash");
+const { SpeedInsights } = require("@vercel/speed-insights");
 
+const app = express();
+
+// Use SpeedInsights middleware or initialization if needed
+app.use(SpeedInsights()); // Assuming it's used as middleware; update based on library docs
+
+// Set up EJS
 app.set("view engine", "ejs");
+
+// Middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
@@ -14,7 +22,7 @@ mongoose
     .then(() => console.log("Connected to MongoDB"))
     .catch((err) => console.error("Error connecting to MongoDB:", err));
 
-// Define Schema and Model
+// Define Schemas
 const itemsSchema = {
     name: {
         type: String,
@@ -22,21 +30,23 @@ const itemsSchema = {
     },
 };
 
-const Item = mongoose.model("Item", itemsSchema);
-
-// Default Items
-const item1 = new Item({ name: "Welcome to your to-do list!" });
-const item2 = new Item({ name: "Hit the + button to add a new item." });
-const item3 = new Item({ name: "<-- Hit this to delete an item." });
-
-const defaultItems = [item1, item2, item3];
 const listSchema = {
     name: String,
-    items: [itemsSchema]
-}
+    items: [itemsSchema],
+};
 
-const List = mongoose.model("List", listSchema)
-// Save Default Items to DB
+// Define Models
+const Item = mongoose.model("Item", itemsSchema);
+const List = mongoose.model("List", listSchema);
+
+// Default Items
+const defaultItems = [
+    new Item({ name: "Welcome to your to-do list!" }),
+    new Item({ name: "Hit the + button to add a new item." }),
+    new Item({ name: "<-- Hit this to delete an item." }),
+];
+
+// Save Default Items
 async function saveDefaultItems() {
     try {
         const existingItems = await Item.find({});
@@ -50,9 +60,8 @@ async function saveDefaultItems() {
 }
 saveDefaultItems();
 
-// Routes
 // Home Route
-app.get("/", async function (req, res) {
+app.get("/", async (req, res) => {
     try {
         const foundItems = await Item.find({});
         res.render("list", { listTitle: "Today", newListitems: foundItems });
@@ -62,41 +71,35 @@ app.get("/", async function (req, res) {
     }
 });
 
-
-app.get("/:customListName", async function (req, res) {
+// Custom List Route
+app.get("/:customListName", async (req, res) => {
     const customListName = _.capitalize(req.params.customListName);
 
     try {
-        // Check if the list already exists
         const foundList = await List.findOne({ name: customListName });
-
         if (!foundList) {
-            // If the list doesn't exist, create a new one
             const list = new List({
                 name: customListName,
                 items: defaultItems,
             });
-
             await list.save();
-            console.log(`New list "${customListName}" created.`);
-            res.redirect(`/${customListName}`); // Redirect to the new list
+            res.redirect(`/${customListName}`);
         } else {
-            // If the list exists, render it
             res.render("list", { listTitle: foundList.name, newListitems: foundList.items });
         }
     } catch (err) {
-        console.error("Error creating or fetching custom list:", err);
+        console.error("Error processing custom list:", err);
         res.status(500).send("An error occurred while processing your request.");
     }
 });
 
 // Add New Item
-app.post("/", async function (req, res) {
-    try {
-        const itemName = req.body.newItem;
-        const listName = req.body.list;
-        const newItem = new Item({ name: itemName });
+app.post("/", async (req, res) => {
+    const itemName = req.body.newItem;
+    const listName = req.body.list;
 
+    try {
+        const newItem = new Item({ name: itemName });
         if (listName === "Today") {
             await newItem.save();
             res.redirect("/");
@@ -104,7 +107,7 @@ app.post("/", async function (req, res) {
             const foundList = await List.findOne({ name: listName });
             foundList.items.push(newItem);
             await foundList.save();
-            res.redirect("/" + listName);
+            res.redirect(`/${listName}`);
         }
     } catch (err) {
         console.error("Error adding new item:", err);
@@ -112,8 +115,30 @@ app.post("/", async function (req, res) {
     }
 });
 
-// Work Route (Optional Separate List)
-app.get("/work", async function (req, res) {
+// Delete Item
+app.post("/delete", async (req, res) => {
+    const itemId = req.body.checkbox;
+    const listName = req.body.listName;
+
+    try {
+        if (listName === "Today") {
+            await Item.findByIdAndDelete(itemId);
+            res.redirect("/");
+        } else {
+            await List.findOneAndUpdate(
+                { name: listName },
+                { $pull: { items: { _id: itemId } } }
+            );
+            res.redirect(`/${listName}`);
+        }
+    } catch (err) {
+        console.error("Error deleting item:", err);
+        res.status(500).send("An error occurred while deleting the item.");
+    }
+});
+
+// Optional Work Route
+app.get("/work", async (req, res) => {
     try {
         const foundItems = await Item.find({});
         res.render("list", { listTitle: "Work List", newListitems: foundItems });
@@ -123,33 +148,8 @@ app.get("/work", async function (req, res) {
     }
 });
 
-// Delete Item Route
-app.post("/delete", async function (req, res) {
-    try {
-        const itemId = req.body.checkbox; // ID of the item to be deleted
-        const listName = req.body.listName; // Name of the list (e.g., "Today" or a custom list)
-
-        if (listName === "Today") {
-            // Delete from the "Today" list
-            await Item.findByIdAndDelete(itemId);
-            console.log(`Item with ID "${itemId}" deleted successfully from "Today" list.`);
-            res.redirect("/");
-        } else {
-            // Delete from a custom list
-            await List.findOneAndUpdate(
-                { name: listName },
-                { $pull: { items: { _id: itemId } } } // Remove item from the array
-            );
-            console.log(`Item with ID "${itemId}" deleted successfully from list "${listName}".`);
-            res.redirect("/" + listName);
-        }
-    } catch (err) {
-        console.error("Error deleting item:", err);
-        res.status(500).send("An error occurred while deleting the item.");
-    }
-});
-
 // Start Server
-app.listen(process.env.port || 3000, () => {
-    console.log("Server started on port 3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server started on port ${PORT}`);
 });
