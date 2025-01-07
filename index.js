@@ -2,12 +2,9 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 const _ = require("lodash");
-const { SpeedInsights } = require("@vercel/speed-insights");
 
 const app = express();
 
-// Use SpeedInsights middleware or initialization if needed
-app.use(SpeedInsights()); // Assuming it's used as middleware; update based on library docs
 
 // Set up EJS
 app.set("view engine", "ejs");
